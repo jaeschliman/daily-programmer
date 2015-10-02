@@ -1,0 +1,82 @@
+(ql:quickload :alexandria)
+(defpackage :challenge-20150930 (:use :cl :alexandria))
+(in-package :challenge-20150930)
+;; https://www.reddit.com/r/dailyprogrammer/comments/3n55f3/20150930_challenge_234_intermediate_red_squiggles/
+
+(defun make-empty-trie () (list (list)))
+
+(defun add-to-trie (trie string &optional (idx 0) (end-idx (length string)))
+  (if (< idx end-idx)
+      (let ((char (elt string idx)))
+        (if-let (existing (assoc char (cdr trie)))
+          (add-to-trie existing string (1+ idx))
+          (let ((new (list char)))
+            (push new (cdr trie))
+            (add-to-trie new string (1+ idx)))))
+      (pushnew '(:end . t) (cdr trie))))
+
+(defun trie-find-mismatch (trie string &optional (idx 0) (end-idx (length string)))
+  (labels ((check (node pos)
+             (unless (>= pos end-idx)
+               (let ((ch (elt string pos)))
+                 (if-let (next (assoc ch (cdr node)))
+                   (check next (1+ pos))
+                   (values pos))))))
+    (check trie idx)))
+
+(defun squiggle-word (trie word)
+  (if-let (pos (trie-find-mismatch trie word))
+    (format nil "~A<~A" (subseq word 0 (1+ pos)) (subseq word (1+ pos)))
+    word))
+
+(defun trie-map-suffixes (trie string fn &optional (idx 0) (end-idx (length string)))
+  "calls fn on each string which is a suffix of string in trie"
+  (labels ((to-end (trie idx)
+             (if (< idx end-idx)
+                 (let ((ch (elt string idx)))
+                   (when-let (next (assoc ch (cdr trie)))
+                     (to-end next (1+ idx))))
+                 trie))
+           (map-ends (trie acc)
+             (dolist (pair (cdr trie))
+               (if (eq :end (car pair))
+                   (when acc (funcall fn (nreverse (coerce acc 'string))))
+                   (let ((next (cons (car pair) acc)))
+                     (declare (dynamic-extent next))
+                     (map-ends pair next))))))
+    (when-let (start (to-end trie idx))
+      (map-ends start nil))))
+
+
+(defun correct-word (trie word)
+  (when-let (pos (trie-find-mismatch trie word))
+    (let ((prefix (subseq word 0 pos))
+          (result nil))
+      (flet ((save (suffix)
+               (push (concatenate 'string prefix suffix) result)))
+        (trie-map-suffixes trie prefix #'save)
+        result))))
+
+(defun mapwords (fn)
+  (with-open-file (s "/usr/share/dict/words" :direction :input)
+    (loop for line = (read-line s nil nil) while line
+         do (funcall fn (string-downcase line)))))
+
+(defvar *dictionary* (make-empty-trie))
+(mapwords (lambda (w) (add-to-trie *dictionary* w)))
+
+(defun read-problem (pathname)
+  (with-input-from-file (s pathname)
+    (loop for line = (read-line s nil nil) while line collect line)))
+
+(defun solve-file (pathname)
+  (let* ((lines (read-problem pathname))
+         (solve-line (lambda (line) (squiggle-word *dictionary* line)))
+         (solution (mapcar solve-line lines)))
+    (format t "~{~A~%~}" solution)))
+
+(defun bonus-file (pathname)
+  (let* ((lines (read-problem pathname))
+         (solve-line (lambda (line) (correct-word *dictionary* line)))
+         (solution (mapcar solve-line lines)))
+    (format t "~{~A~%~%~}" solution)))
